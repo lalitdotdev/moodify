@@ -92,7 +92,7 @@ export default function Home() {
         const loadingToast = toast.loading("Generating your playlist...");
 
         try {
-            if (!inputSong.trim()) {
+            if (!inputSong || !inputSong.trim()) {
                 throw new Error("Please enter a song name");
             }
 
@@ -102,24 +102,32 @@ export default function Home() {
                 body: JSON.stringify({ song: inputSong }),
             });
 
-
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
 
-            const data = await response.json();
+            const data = await response.json().catch(() => {
+                throw new Error('Failed to parse response JSON');
+            });
+
+            if (!Array.isArray(data.playlist) || data.playlist.length === 0) {
+                throw new Error("Failed to generate a valid playlist");
+            }
+
             setPlaylist(data.playlist);
             toast.success("Playlist generated successfully!", {
-                id: loadingToast, // Update the existing loading toast with a success message
+                id: loadingToast,
             });
         } catch (error) {
             console.error("Error generating playlist:", error);
             setError(error instanceof Error ? error.message : "An unexpected error occurred");
         } finally {
             setLoading(false);
+            toast.dismiss(loadingToast); // Dismiss the loading toast
         }
     };
+
 
     // ADD PROMISE TOAST NOTIFICATION FOR STATE WHEN GENERATING PLAYLIST AND WHEN ERROR OCCURS
 
