@@ -95,35 +95,34 @@ export default function Home() {
 
             const response = await fetch("/api/generate-playlist", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                },
                 body: JSON.stringify({ song: inputSong }),
             });
 
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                throw new Error(
+                    errorData.error || `HTTP error! status: ${response.status}`
+                );
             }
 
-            const data = await response.json().catch(() => {
-                throw new Error('Failed to parse response JSON');
-            });
-
-            if (!Array.isArray(data.playlist) || data.playlist.length === 0) {
-                throw new Error("Failed to generate a valid playlist");
-            }
-
+            const data = await response.json();
             setPlaylist(data.playlist);
             toast.success("Playlist generated successfully!", {
                 id: loadingToast,
             });
         } catch (error) {
             console.error("Error generating playlist:", error);
-            setError(error instanceof Error ? error.message : "An unexpected error occurred");
+            setError(
+                error instanceof Error ? error.message : "An unexpected error occurred"
+            );
         } finally {
             setLoading(false);
-            toast.dismiss(loadingToast); // Dismiss the loading toast
         }
     };
+
 
 
     // ADD PROMISE TOAST NOTIFICATION FOR STATE WHEN GENERATING PLAYLIST AND WHEN ERROR OCCURS
