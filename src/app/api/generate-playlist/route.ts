@@ -109,7 +109,7 @@ export async function POST(request: Request) {
       // Get the Gemini Pro model
       const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-      const prompt = `Generate a curated playlist of 10 songs similar to "${song}". For each song, provide:
+      const prompt = `Generate a curated playlist of 15 songs similar to "${song}". For each song, provide:
 
   1. Song title
   2. Artist name
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
   5. Genre(s)
   6. A brief explanation (1-2 sentences) of why this song is similar to "${song}" in terms of style, mood, or musical elements.
 
-  Ensure a diverse selection within the similarity criteria, including both well-known and lesser-known artists. Avoid duplicate artists unless they have a particularly relevant song. Format the response as a JSON array of objects, each containing the fields: name, artist, album, year, genres (as an array), and explanation. Ensure the JSON is valid and properly formatted. Do not include any markdown formatting, code block syntax, or additional text in your response. The response should be a valid JSON array and nothing else.`;
+  Ensure a diverse selection within the similarity criteria, including both well-known and lesser-known artists. Avoid duplicate artists unless they have a particularly relevant song. Format the response as a JSON array of objects, each containing the fields: name, artist, album, year, genres (as an array), and explanation. Ensure the JSON is valid and properly formatted. Do not include any markdown formatting, code block syntax, or additional text in your response. The response should be a valid JSON array and nothing else. The playlist should be a mix of popular and lesser-known songs, with a diverse selection of genres and artists. `;
 
       // Generate the playlist using the Gemini Pro model
       const result = (await Promise.race([
