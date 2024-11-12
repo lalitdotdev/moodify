@@ -21,7 +21,6 @@ interface Song {
 const BackgroundGradient = () => (
     <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950" />
-        <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-20" />
         <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 via-transparent to-pink-500/10 animate-pulse" />
     </div>
 );
@@ -80,10 +79,8 @@ export default function Home() {
         const interval = setInterval(() => {
             setSuggestions(getRandomSuggestions(6));
         }, 30000);
-
         return () => clearInterval(interval);
     }, []);
-
     const generatePlaylist = async () => {
         setLoading(true);
         setError("");
