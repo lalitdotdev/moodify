@@ -13,33 +13,46 @@ interface Song {
 const MAX_RETRIES = 2;
 const TIMEOUT = 50000; // 50 seconds
 
-// Get a Spotify access token using client credentials flow (requires client ID and secret)
 async function getSpotifyAccessToken(): Promise<string | null> {
-  // Base64 Encoding of Spotify Credentials
   const basic = Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64');
 
-  const response = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${basic}`, //The Base64-encoded client credentials are passed here as the value of the Authorization header.
-      'Content-Type': 'application/x-www-form-urlencoded', // specifies that the data being sent in the request body is URL-encoded.
-    },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials', //sets the grant_type to client_credentials, as required by Spotify's API for this type of authorization.
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 seconds timeout
 
-  if (!response.ok) {
-    console.error('Failed to get Spotify access token');
+  try {
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+      }),
+      signal: controller.signal, // Attach the abort controller
+    });
+
+    if (!response.ok) {
+      console.error('Failed to get Spotify access token');
+      return null;
+    }
+
+    const data = await response.json();
+    return data.access_token;
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      // Now TypeScript knows 'error' is an instance of Error
+      console.error('Error occurred:', error.message);
+    } else {
+      // Handle the case where 'error' is not an instance of Error
+      console.error('An unknown error occurred');
+    }
     return null;
+  } finally {
+    clearTimeout(timeoutId); // Cleanup timeout
   }
-
-  const data = await response.json();
-  console.log('Data while getting Spotify access token:', data);
-  return data.access_token;
 }
 
-// Search for a track on Spotify and return the track ID if found
 async function searchSpotifyTrack(song: Song): Promise<string | undefined> {
   const accessToken = await getSpotifyAccessToken();
   if (!accessToken) {
@@ -49,8 +62,6 @@ async function searchSpotifyTrack(song: Song): Promise<string | undefined> {
 
   const query = `${song.name} ${song.artist}`;
   const encodedQuery = encodeURIComponent(query);
-  console.log('Encoded query:', encodedQuery);
-
   const url = `https://api.spotify.com/v1/search?q=${encodedQuery}&type=track&limit=1`;
 
   try {
@@ -75,7 +86,6 @@ async function searchSpotifyTrack(song: Song): Promise<string | undefined> {
   return undefined;
 }
 
-// POST /api/generate-playlist route handler
 export async function POST(request: Request) {
   let retries = 0;
   let requestBody;
@@ -111,14 +121,14 @@ export async function POST(request: Request) {
 
       const prompt = `Generate a curated playlist of 15 songs similar to "${song}". For each song, provide:
 
-  1. Song title
-  2. Artist name
-  3. Album name (if applicable)
-  4. Release year
-  5. Genre(s)
-  6. A brief explanation (1-2 sentences) of why this song is similar to "${song}" in terms of style, mood, or musical elements.
+    1. Song title
+    2. Artist name
+    3. Album name (if applicable)
+    4. Release year
+    5. Genre(s)
+    6. A brief explanation (1-2 sentences) of why this song is similar to "${song}" in terms of style, mood, or musical elements.
 
-  Ensure a diverse selection within the similarity criteria, including both well-known and lesser-known artists. Avoid duplicate artists unless they have a particularly relevant song. Format the response as a JSON array of objects, each containing the fields: name, artist, album, year, genres (as an array), and explanation. Ensure the JSON is valid and properly formatted. Do not include any markdown formatting, code block syntax, or additional text in your response. The response should be a valid JSON array and nothing else. The playlist should be a mix of popular and lesser-known songs, with a diverse selection of genres and artists. `;
+    Ensure a diverse selection within the similarity criteria, including both well-known and lesser-known artists. Avoid duplicate artists unless they have a particularly relevant song. Format the response as a JSON array of objects, each containing the fields: name, artist, album, year, genres (as an array), and explanation. Ensure the JSON is valid and properly formatted. Do not include any markdown formatting, code block syntax, or additional text in your response. The response should be a valid JSON array and nothing else. The playlist should be a mix of popular and lesser-known songs, with a diverse selection of genres and artists. `;
 
       // Generate the playlist using the Gemini Pro model
       const result = (await Promise.race([
@@ -126,9 +136,9 @@ export async function POST(request: Request) {
         new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), TIMEOUT)),
       ])) as GenerateContentResult;
 
-      console.log('Response:', result);
+      //   console.log('Response:', result);
       const responseText = result.response.text();
-      console.log('Response text:', responseText);
+      //   console.log('Response text:', responseText);
 
       // Clean up the response text by removing code block syntax and extra whitespace and commas between objects in the array
       const cleanedResponse = responseText
@@ -154,9 +164,15 @@ export async function POST(request: Request) {
             }
           } catch (lineError) {
             console.error('Error parsing line:', lineError);
+            console.error(`Error parsing line: ${line}`);
+            console.error(`Position of error: ${line.indexOf(line)}`);
           }
           return [];
         });
+      }
+
+      if (!playlist || !Array.isArray(playlist) || playlist.length === 0) {
+        throw new Error('Failed to generate a valid playlist');
       }
 
       if (!Array.isArray(playlist) || playlist.length === 0) {
