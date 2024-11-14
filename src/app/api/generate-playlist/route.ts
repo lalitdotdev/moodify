@@ -80,7 +80,7 @@ interface RawSongData {
 
 export async function POST(request: Request) {
   const MAX_RETRIES = 3;
-  const TIMEOUT = 30000;
+  const TIMEOUT = 60000;
   let retries = 0;
 
   while (retries <= MAX_RETRIES) {
