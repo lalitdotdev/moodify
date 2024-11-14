@@ -10,6 +10,9 @@ interface Song {
   spotifyId?: string;
 }
 
+const MAX_RETRIES = 2;
+const TIMEOUT = 50000; // 50 seconds
+
 async function getSpotifyAccessToken(): Promise<string | null> {
   const basic = Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64');
   const response = await fetch('https://accounts.spotify.com/api/token', {
@@ -69,23 +72,20 @@ async function searchSpotifyTrack(song: Song): Promise<string | undefined> {
 // Define interfaces for type safety
 
 // Interface for raw parsed data
-interface RawSongData {
-  name?: string | null;
-  artist?: string | null;
-  album?: string | null;
-  year?: string | number | null;
-  genres?: unknown;
-  explanation?: string | null;
-}
 
 export async function POST(request: Request) {
-  const MAX_RETRIES = 3;
-  const TIMEOUT = 60000;
   let retries = 0;
+  let requestBody;
+
+  try {
+    requestBody = await request.json();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  } catch (error) {
+    return Response.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+  }
 
   while (retries <= MAX_RETRIES) {
     try {
-      const requestBody = await request.json();
       const { song } = requestBody;
 
       if (!song || typeof song !== 'string') {
@@ -100,118 +100,98 @@ export async function POST(request: Request) {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-      const prompt = `Generate a curated playlist of 10 songs similar to "${song}". Return only a JSON array of objects with the following structure, and no additional text or formatting:
-        {
-          "name": "Song Name",
-          "artist": "Artist Name",
-          "album": "Album Name",
-          "year": "1234",
-          "genres": ["Genre1", "Genre2"],
-          "explanation": "Brief explanation"
-        }`;
+      const prompt = `Generate a curated playlist of 10 songs similar to "${song}". For each song, provide:
+
+  1. Song title
+  2. Artist name
+  3. Album name (if applicable)
+  4. Release year
+  5. Genre(s)
+  6. A brief explanation (1-2 sentences) of why this song is similar to "${song}" in terms of style, mood, or musical elements.
+
+  Ensure a diverse selection within the similarity criteria, including both well-known and lesser-known artists. Avoid duplicate artists unless they have a particularly relevant song. Format the response as a JSON array of objects, each containing the fields: name, artist, album, year, genres (as an array), and explanation. Ensure the JSON is valid and properly formatted. Do not include any markdown formatting, code block syntax, or additional text in your response. The response should be a valid JSON array and nothing else.`;
 
       const result = (await Promise.race([
         model.generateContent(prompt),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), TIMEOUT)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), TIMEOUT)),
       ])) as GenerateContentResult;
 
       const responseText = result.response.text();
 
-      let cleanedResponse = responseText
-        .replace(/```json|\```/g, '')
-        .replace(/^\s*|\s*$/g, '')
+      // Clean up the response
+      const cleanedResponse = responseText
+        .replace(/```json\s*|\s*```/g, '')
+        .replace(/^\s*\[|\]\s*$/g, '')
+        .replace(/},\s*{/g, '},\n{')
         .trim();
-
-      if (!cleanedResponse.startsWith('[')) {
-        cleanedResponse = '[' + cleanedResponse;
-      }
-      if (!cleanedResponse.endsWith(']')) {
-        cleanedResponse = cleanedResponse + ']';
-      }
 
       let playlist: Song[];
       try {
-        const parsedData = JSON.parse(cleanedResponse) as RawSongData[];
-
-        if (!Array.isArray(parsedData)) {
-          throw new Error('Response is not an array');
-        }
-
-        // Map the parsed data to match the Song type with proper type checking
-        playlist = parsedData.map((item: RawSongData) => ({
-          name: String(item.name || ''),
-          artist: String(item.artist || ''),
-          album: String(item.album || ''),
-          year: String(item.year || ''),
-          genres: Array.isArray(item.genres) ? item.genres.map((genre) => String(genre || '')) : [],
-          explanation: String(item.explanation || ''),
-        }));
-      } catch (error) {
-        console.error(`Attempt ${retries + 1}: JSON parsing error:`, error);
-        throw new Error('Failed to parse playlist data');
+        // Attempt to parse the entire array
+        playlist = JSON.parse(`[${cleanedResponse}]`);
+      } catch (parseError) {
+        console.error('JSON parsing failed:', parseError);
+        // If parsing fails, try to parse each object separately
+        const lines = cleanedResponse.split('\n');
+        playlist = lines.flatMap((line) => {
+          try {
+            const parsedLine = JSON.parse(line);
+            if (typeof parsedLine === 'object' && parsedLine !== null) {
+              return [parsedLine];
+            }
+          } catch (lineError) {
+            console.error('Error parsing line:', lineError);
+          }
+          return [];
+        });
       }
 
-      // Add Spotify track IDs
+      if (!Array.isArray(playlist) || playlist.length === 0) {
+        throw new Error('Failed to generate a valid playlist');
+      }
+
+      playlist = playlist
+        .filter((song): song is Song => song && typeof song === 'object')
+        .map((song) => ({
+          name: song.name || 'Unknown',
+          artist: song.artist || 'Unknown',
+          album: song.album,
+          year: song.year,
+          genres: Array.isArray(song.genres) ? song.genres : [],
+          explanation: song.explanation,
+        }));
+
+      if (playlist.length === 0) {
+        throw new Error('Failed to generate a valid playlist after filtering');
+      }
+
+      // After generating and parsing the playlist, add Spotify track IDs
       const playlistWithSpotifyIds = await Promise.all(
         playlist.map(async (song) => {
-          try {
-            const spotifyId = await searchSpotifyTrack(song);
-            return { ...song, spotifyId };
-          } catch (error) {
-            console.error(`Failed to fetch Spotify ID for ${song.name}:`, error);
-            return { ...song, spotifyId: null };
-          }
+          const spotifyId = await searchSpotifyTrack(song);
+          return { ...song, spotifyId };
         }),
       );
 
-      return Response.json(
-        {
-          playlist: playlistWithSpotifyIds,
-        },
-        {
-          status: 200,
-          headers: {
-            'Cache-Control': 'no-store',
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-    } catch (error) {
-      console.error(`Attempt ${retries + 1} failed:`, error);
+      return Response.json({ playlist: playlistWithSpotifyIds });
+    } catch (error: unknown) {
+      console.error(`Error in generate-playlist route (attempt ${retries + 1}):`, error);
+      retries++;
 
-      if (retries >= MAX_RETRIES) {
+      if (retries > MAX_RETRIES) {
         return Response.json(
           {
             error: 'Failed to generate playlist after multiple attempts',
             details: error instanceof Error ? error.message : String(error),
           },
-          {
-            status: 500,
-            headers: {
-              'Cache-Control': 'no-store',
-              'Content-Type': 'application/json',
-            },
-          },
+          { status: 500 },
         );
       }
-
-      const delay = Math.min(1000 * Math.pow(2, retries), 10000);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-
-      retries++;
     }
   }
 
-  return Response.json(
-    {
-      error: 'Unexpected error occurred',
-    },
-    {
-      status: 500,
-      headers: {
-        'Cache-Control': 'no-store',
-        'Content-Type': 'application/json',
-      },
-    },
-  );
+  // This should never be reached, but TypeScript requires a return statement
+  return Response.json({ error: 'Unexpected error occurred' }, { status: 500 });
 }
+
+// Type definitions for better type safety
