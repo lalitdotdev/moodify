@@ -98,7 +98,7 @@ export async function POST(request: Request) {
       }
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
       const prompt = `Generate a curated playlist of 10 songs similar to "${song}". For each song, provide:
 
